@@ -30,14 +30,16 @@ def get_assets_csv_schema():
     return {
         "date": pl.Utf8,
         "personName": pl.Utf8,
-        "numberOfShares": pl.Utf8,  # Keep as string to preserve precision
-        "sharePrice": pl.Utf8,  # Keep as string to preserve precision
-        "exchangeRate": pl.Utf8,  # Keep as string to preserve precision
-        "ticker": pl.Utf8,
         "companyName": pl.Utf8,
         "currencyCode": pl.Utf8,
+        "currentPrice": pl.Utf8,  # Keep as string to preserve precision
         "exchange": pl.Utf8,
+        "exchangeRate": pl.Utf8,  # Keep as string to preserve precision
+        "exerciseOptionPrice": pl.Utf8,  # Keep as string to preserve precision
         "interactive": pl.Utf8,
+        "numberOfShares": pl.Utf8,  # Keep as string to preserve precision
+        "sharePrice": pl.Utf8,  # Keep as string to preserve precision
+        "ticker": pl.Utf8,
     }
 
 
@@ -85,6 +87,9 @@ def clean_and_deduplicate(df, dataset_type):
                     pl.col("exchange").fill_null(""),
                     pl.col("interactive").fill_null(""),
                     pl.col("exchangeRate").fill_null(""),
+                    pl.col("exerciseOptionPrice").fill_null(
+                        ""
+                    ),  # Include new column in dedup key
                 ],
                 separator="|",
             ).alias("dedup_key")

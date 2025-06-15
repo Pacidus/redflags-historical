@@ -28,16 +28,16 @@ def get_assets_schema():
     return {
         "date": pl.Date,
         "personName": pl.Categorical,
-        "ticker": pl.Categorical,
         "companyName": pl.Categorical,
         "currencyCode": pl.Categorical,
+        "currentPrice": pl.Decimal(precision=18, scale=11),
         "exchange": pl.Categorical,
+        "exchangeRate": pl.Decimal(precision=18, scale=8),
+        "exerciseOptionPrice": pl.Decimal(precision=18, scale=11),
         "interactive": pl.Boolean,
         "numberOfShares": pl.Decimal(precision=18, scale=2),
         "sharePrice": pl.Decimal(precision=18, scale=11),
-        "exchangeRate": pl.Decimal(precision=18, scale=8),
-        "exerciseOptionPrice": pl.Decimal(precision=18, scale=11),
-        "currentPrice": pl.Decimal(precision=18, scale=11),
+        "ticker": pl.Categorical,
     }
 
 

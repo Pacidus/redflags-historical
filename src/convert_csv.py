@@ -52,20 +52,22 @@ def convert_json_to_csv(json_folder, output_prefix="raw_data"):
                 }
                 billionaires.append(billionaire)
 
-                # Process assets without asset_index
+                # Process assets with all discovered columns
                 for asset in record.get("financialAssets", []):
                     assets.append(
                         {
                             "date": date_str,
                             "personName": record.get("personName", ""),
-                            "numberOfShares": asset.get("numberOfShares", ""),
-                            "sharePrice": asset.get("sharePrice", ""),
-                            "exchangeRate": asset.get("exchangeRate", ""),
-                            "ticker": asset.get("ticker", ""),
                             "companyName": asset.get("companyName", ""),
                             "currencyCode": asset.get("currencyCode", ""),
+                            "currentPrice": asset.get("currentPrice", ""),
                             "exchange": asset.get("exchange", ""),
+                            "exchangeRate": asset.get("exchangeRate", ""),
+                            "exerciseOptionPrice": asset.get("exerciseOptionPrice", ""),
                             "interactive": asset.get("interactive", ""),
+                            "numberOfShares": asset.get("numberOfShares", ""),
+                            "sharePrice": asset.get("sharePrice", ""),
+                            "ticker": asset.get("ticker", ""),
                         }
                     )
         except Exception:
