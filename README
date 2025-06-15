@@ -1,0 +1,121 @@
+# Parquet Optimization Journey: Billionaires & Assets Dataset
+
+## Dataset Overview
+
+### Billionaires Dataset
+- **Rows**: 4,846,669 records
+- **Columns**: 14 fields tracking billionaire wealth over time
+- **Schema**:
+  ```
+  - date: Date (YYYYMMDD format)
+  - personName: Categorical
+  - lastName: Categorical
+  - birthDate: Date (epoch timestamp converted)
+  - gender: Categorical
+  - countryOfCitizenship: Categorical
+  - city: Categorical
+  - state: Categorical
+  - source: Categorical (wealth source)
+  - industries: Categorical
+  - finalWorth: Decimal(18,8)
+  - estWorthPrev: Decimal(18,8)
+  - archivedWorth: Decimal(18,8)
+  - privateAssetsWorth: Decimal(18,8)
+  ```
+
+### Assets Dataset
+- **Rows**: 7,715,630 records
+- **Columns**: 12 fields tracking billionaire asset holdings
+- **Schema**:
+  ```
+  - date: Date
+  - personName: Categorical
+  - ticker: Categorical
+  - companyName: Categorical
+  - currencyCode: Categorical
+  - exchange: Categorical
+  - interactive: Boolean (options vs regular shares)
+  - numberOfShares: Decimal(18,2)
+  - sharePrice: Decimal(18,11)
+  - exchangeRate: Decimal(18,8)
+  - exerciseOptionPrice: Decimal(18,11)
+  - currentPrice: Decimal(18,11)
+  ```
+
+## Compression Journey
+
+### Stage 1: Initial Parquet Conversion
+- **Format**: CSV → Parquet with Snappy compression
+- **Result**: ~346MB total (189MB assets + 157MB billionaires)
+- **Issue**: No data organization for compression
+
+### Stage 2: Data Sorting
+- **Strategy**: Sort by personName → date
+- **Result**: 144MB total (82MB assets + 62MB billionaires)
+- **Improvement**: 58% reduction through data locality
+
+### Stage 3: Compression Algorithm Comparison
+Tested multiple algorithms on sorted data:
+
+| Algorithm | Assets | Billionaires | Total |
+|-----------|--------|--------------|-------|
+| Snappy    | 82MB   | 62MB        | 144MB |
+| LZ4       | 85MB   | 57MB        | 142MB |
+| **Zstd**  | **54MB** | **40MB**   | **94MB** |
+| Gzip      | 55MB   | 42MB        | 97MB  |
+| Brotli    | 60MB   | 45MB        | 105MB |
+
+**Winner**: Zstd - best balance of compression and speed
+
+### Stage 4: Advanced Multi-Column Sorting
+- **Billionaires**: personName → date (unchanged)
+- **Assets**: personName → companyName → interactive → date
+- **Final Result**: 72MB total (32MB assets + 40MB billionaires)
+- **Total Reduction**: 79% from original Parquet
+
+## Key Optimizations Applied
+
+1. **Type-Specific Handling**:
+   - Dates: Converted from integers/strings to proper Date type
+   - Decimals: Preserved precision for financial data
+   - Categoricals: Efficient encoding for repeated strings
+
+2. **Intelligent Sorting**:
+   - Groups similar data together
+   - Enables run-length encoding
+   - Maximizes dictionary compression
+
+3. **Compression Algorithm**:
+   - Zstd provides optimal compression/speed tradeoff
+   - Particularly effective on sorted, repetitive data
+
+## Technical Implementation
+
+### Issues Resolved
+1. **Type Mismatch**: Fixed comparison between numeric columns and empty strings
+2. **Date Parsing**: Handled integer dates (YYYYMMDD) by converting to strings first
+3. **Missing Columns**: Gracefully handled with appropriate null values
+
+### Final Command
+```bash
+python src/convert_parquet.py \
+  --billionaires cleaned_data/billionaires_clean.csv \
+  --assets cleaned_data/assets_clean.csv \
+  --compression zstd
+```
+
+## Results Summary
+
+- **Space Savings**: 346MB → 72MB (79% reduction)
+- **Performance**: Maintained fast query performance with Zstd
+- **Data Integrity**: All 12.5M+ records preserved with proper types
+- **Query Optimization**: Data physically organized for efficient person/company analysis
+
+## Lessons Learned
+
+1. **Sorting is crucial**: Proper data organization can reduce size by >50% alone
+2. **Column order matters**: Multi-level sorting (person→company→type→date) maximizes compression
+3. **Algorithm selection**: Zstd outperformed even Brotli on this structured financial data
+4. **Type precision**: Using appropriate decimal precision preserves accuracy while enabling compression
+
+This optimization makes the dataset ideal for analytical workloads while minimizing storage costs and I/O overhead.
