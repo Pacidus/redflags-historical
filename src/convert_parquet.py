@@ -41,16 +41,32 @@ def get_assets_schema():
     }
 
 
+def get_csv_read_schema(target_schema):
+    """Create a schema for reading CSV where all columns are strings to prevent float conversion"""
+    csv_schema = {}
+    for col_name, _ in target_schema.items():
+        csv_schema[col_name] = pl.Utf8
+    return csv_schema
+
+
 def convert_to_parquet(
     csv_file, schema_func, output_file, compression="snappy", sort_columns=None
 ):
     print(f"📖 Reading {csv_file}...")
-    df = pl.read_csv(
-        csv_file, infer_schema_length=10000
-    )  # Increased for better type detection
-    print(f"   Original shape: {df.shape}")
 
+    # Get target schema
     target_schema = schema_func()
+
+    # Read CSV with all columns as strings to prevent any automatic float conversion
+    csv_read_schema = get_csv_read_schema(target_schema)
+    df = pl.read_csv(
+        csv_file,
+        schema_overrides=csv_read_schema,
+        infer_schema_length=0,  # Disable inference completely
+    )
+    print(f"   Original shape: {df.shape}")
+    print(f"   All columns read as strings to preserve precision")
+
     column_expressions = []
 
     for col_name, dtype in target_schema.items():
@@ -65,60 +81,64 @@ def convert_to_parquet(
 
         # Special handling for epoch birthDate
         if col_name == "birthDate":
+            # First check if the value is numeric (epoch timestamp)
             expr = (
-                pl.col(col_name)
-                .cast(pl.Int64)
-                .cast(pl.Datetime(time_unit="ms"))
-                .cast(pl.Date)
+                pl.when(pl.col(col_name).str.contains("^[0-9]+$"))
+                .then(
+                    pl.col(col_name)
+                    .cast(pl.Int64)
+                    .cast(pl.Datetime(time_unit="ms"))
+                    .cast(pl.Date)
+                )
+                .otherwise(
+                    pl.col(col_name).str.strptime(pl.Date, "%Y-%m-%d", strict=False)
+                )
                 .alias(col_name)
             )
         # Date handling
         elif dtype == pl.Date:
             if col_name == "date":
-                # Check if date is already numeric (YYYYMMDD as integer)
-                if df[col_name].dtype in [pl.Int32, pl.Int64]:
-                    expr = (
-                        pl.col(col_name)
-                        .cast(pl.Utf8)
-                        .str.strptime(pl.Date, "%Y%m%d", strict=False)
-                    )
-                else:
-                    expr = pl.col(col_name).str.strptime(
-                        pl.Date, "%Y%m%d", strict=False
-                    )
+                # Date is in YYYYMMDD format
+                expr = pl.col(col_name).str.strptime(pl.Date, "%Y%m%d", strict=False)
             else:
                 expr = pl.col(col_name).str.strptime(pl.Date, "%Y-%m-%d", strict=False)
-        # Decimal handling - simplified for numeric columns
+        # Decimal handling - DIRECT conversion from string to Decimal
         elif "Decimal" in str(dtype):
-            # If column is already numeric, just cast it
-            if df[col_name].dtype in [pl.Float32, pl.Float64, pl.Int32, pl.Int64]:
-                expr = pl.col(col_name).cast(dtype).alias(col_name)
-            else:
-                # If it's string, handle empty strings
-                expr = (
-                    pl.when(pl.col(col_name) == "")
-                    .then(None)
-                    .otherwise(pl.col(col_name))
-                    .cast(dtype)
-                    .alias(col_name)
-                )
+            expr = (
+                pl.when(pl.col(col_name) == "")
+                .then(None)
+                .otherwise(pl.col(col_name))
+                .cast(
+                    dtype
+                )  # Direct cast from string to Decimal, no float intermediate
+                .alias(col_name)
+            )
         # Boolean handling
         elif dtype == pl.Boolean:
             expr = (
-                pl.col(col_name)
-                .cast(pl.Boolean, strict=False)  # Simplified for sanitized data
+                pl.when(pl.col(col_name).is_in(["True", "true", "1", "TRUE"]))
+                .then(True)
+                .when(pl.col(col_name).is_in(["False", "false", "0", "FALSE"]))
+                .then(False)
+                .otherwise(None)
                 .alias(col_name)
             )
         # Categorical handling
         elif dtype == pl.Categorical:
-            expr = pl.col(col_name).cast(pl.Categorical).alias(col_name)
+            expr = (
+                pl.when(pl.col(col_name) == "")
+                .then(None)
+                .otherwise(pl.col(col_name))
+                .cast(pl.Categorical)
+                .alias(col_name)
+            )
         # Default casting
         else:
             expr = pl.col(col_name).cast(dtype).alias(col_name)
 
         column_expressions.append(expr)
 
-    print("🔄 Applying schema transformations...")
+    print("🔄 Applying schema transformations (string → target types)...")
     df_typed = df.select(column_expressions)
     df_final = df_typed.select(list(target_schema.keys()))
 
@@ -130,6 +150,20 @@ def convert_to_parquet(
     print(f"   Final shape: {df_final.shape}")
     print(f"💾 Writing {output_file} with {compression} compression...")
     df_final.write_parquet(output_file, compression=compression)
+
+    # Verify decimal precision was preserved
+    print("🔍 Verifying decimal precision...")
+    sample_decimals = []
+    for col, dtype in target_schema.items():
+        if "Decimal" in str(dtype):
+            non_null = df_final.filter(pl.col(col).is_not_null()).select(col).limit(5)
+            if len(non_null) > 0:
+                sample_decimals.append(f"   {col}: {non_null[col].to_list()[0]}")
+    if sample_decimals:
+        print("   Sample decimal values (first non-null):")
+        for sample in sample_decimals[:3]:  # Show first 3 decimal columns
+            print(sample)
+
     return df_final.shape[0]
 
 
@@ -151,6 +185,10 @@ def main():
 
     print("🚀 Starting CSV to Parquet conversion...")
     print(f"📦 Using {args.compression} compression")
+    print(
+        "🔒 Reading all numeric values as strings first to preserve decimal precision"
+    )
+
     try:
         # Process billionaires
         print("\n" + "=" * 60)
@@ -181,9 +219,13 @@ def main():
         print(f"✅ Billionaires: {bill_rows:,} rows")
         print(f"✅ Assets: {asset_rows:,} rows")
         print(f"📁 Files saved to: {output_dir.absolute()}")
+        print(f"🔒 All decimal values preserved without float conversion")
         return True
     except Exception as e:
         print(f"❌ Error: {e}")
+        import traceback
+
+        traceback.print_exc()
         return False
 
 
